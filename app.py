@@ -96,9 +96,9 @@ if uploaded_files:
     st.markdown("Extracted Tafel Parameters:")
     for k, v in params.items():
       if isinstance(v, float):
-      st.write(f"**{k}:** {v:.3e}")
+        st.write(f"**{k}:** {v:.3e}")
       else:
-      st.write(f"**{k}:** {v}")
+        st.write(f"**{k}:** {v}")
 
     except Exception as e:
       st.error(f"Error processing file: {e}")
