@@ -100,5 +100,5 @@ if uploaded_files:
       else:
         st.write(f"**{k}:** {v}")
 
-      except Exception as e:
-        st.error(f"Error processing file: {e}")
+except Exception as e:
+  st.error(f"Error processing file: {e}")
