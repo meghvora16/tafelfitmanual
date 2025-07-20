@@ -89,16 +89,16 @@ if uploaded_files:
       st.warning("Too few valid data points.")
     continue
 
-params, slope_a, int_a, slope_c, int_c = calculate_parameters(E, I)
-
-plot_fit(E, I, slope_a, int_a, slope_c, int_c)
-
-st.markdown("Extracted Tafel Parameters:")
+    params, slope_a, int_a, slope_c, int_c = calculate_parameters(E, I)
+    
+    plot_fit(E, I, slope_a, int_a, slope_c, int_c)
+    
+    st.markdown("Extracted Tafel Parameters:")
 for k, v in params.items():
   if isinstance(v, float):
   st.write(f"**{k}:** {v:.3e}")
   else:
   st.write(f"**{k}:** {v}")
 
-except Exception as e:
-  st.error(f"Error processing file: {e}")
+  except Exception as e:
+    st.error(f"Error processing file: {e}")
