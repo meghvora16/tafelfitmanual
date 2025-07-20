@@ -85,8 +85,8 @@ if uploaded_files:
     I = df[current_col].values
     E, I = clean_data(E, I)
 
-if len(I) < 10:
-  st.warning("Too few valid data points.")
+  if len(I) < 10:
+    st.warning("Too few valid data points.")
   continue
 
 params, slope_a, int_a, slope_c, int_c = calculate_parameters(E, I)
