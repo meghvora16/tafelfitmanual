@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 
 st.set_page_config(layout="wide")
-st.title("Tafel Analysis App (log(I) vs E)")
+st.title("Tafel Analysis App")
 
 uploaded_file = st.file_uploader(
     "Upload your polarization file (.xlsx/.csv)",
@@ -72,7 +72,7 @@ if uploaded_file:
     ax.legend()
     st.pyplot(fig)
 
-    st.info("Select the linear(flat) cathodic and anodic regions using sliders ⬇️")
+    st.info("Select the linear(flat) cathodic and anodic regions using sliders")
     # ---------- Choose window for fit regions ----------
     # Points left/right of Ecorr
     cath_idx = np.where(E < Ecorr)[0]
@@ -146,5 +146,3 @@ if uploaded_file:
     st.write(f"**Corrosion Rate (mm/y):** `{corrosion_rate:.3e}`")
     st.write(f"**R² anodic:** `{r2_a:.3f}`")
     st.write(f"**R² cathodic:** `{r2_c:.3f}`")
-
-    st.success("You can adjust the regions above for the best straight-line fit. The plot above always shows BOTH linear fit regions and their fits.")
