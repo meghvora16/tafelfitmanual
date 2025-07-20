@@ -70,12 +70,11 @@ def plot_fit(E, I, slope_a, int_a, slope_c, int_c):
 
 if uploaded_files:
   for file in uploaded_files:
-  st.subheader(f"📄 {file.name}")
+    st.subheader(f"📄 {file.name}")
   try:
     df = pd.read_excel(file)
     df.columns = [c.lower().strip() for c in df.columns]
-    potential_col = next((col for col in df.columns if 'potential' in col),
-    None)
+    potential_col = next((col for col in df.columns if 'potential' in col),None)
     current_col = next((col for col in df.columns if 'current' in col), None)
 
     if not potential_col or not current_col:
