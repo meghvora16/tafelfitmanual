@@ -78,7 +78,7 @@ if uploaded_files:
     current_col = next((col for col in df.columns if 'current' in col), None)
 
     if not potential_col or not current_col:
-    st.error("Could not find 'potential' and 'current' columns in the file.")
+      st.error("Could not find 'potential' and 'current' columns in the file.")
     continue
 
     E = df[potential_col].values
