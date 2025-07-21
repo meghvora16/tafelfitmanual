@@ -21,7 +21,7 @@ def interpolate_corr(E, I):
     return Ecorr, Icorr
 
 st.set_page_config(layout='wide')
-st.title("Tafel Analysis With Slider-Selected Linear Region")
+st.title("Tafel Analysis With Auto-Suggested and Manual Activation (Linear) Region")
 
 uploaded_file = st.file_uploader("Upload Excel or CSV", type=['xlsx', 'csv'])
 
@@ -48,50 +48,69 @@ if uploaded_file:
     logI = np.log10(np.abs(I))
     Ecorr, Icorr = interpolate_corr(E, I)
 
-    st.markdown("### 1. Choose the region (window) for the Tafel (linear) fit:")
-    default_win = 0.25
-    left_default = float(max(np.min(E), Ecorr - default_win))
-    right_default = float(min(np.max(E), Ecorr + default_win))
+    # --------- Auto activation region detection (±0.07 V around Ecorr, clipped to data range) -----
+    delta_E_auto = 0.07
+    auto_left = float(max(np.min(E), Ecorr - delta_E_auto))
+    auto_right = float(min(np.max(E), Ecorr + delta_E_auto))
+    auto_region = (auto_left, auto_right)
 
+    st.markdown("### 1. Choose the region (window) for the Tafel (linear) fit:")
+    st.markdown(
+        f"<span style='color:darkorange'>The yellow region below is automatically suggested as a starting point (Ecorr ± 0.07 V). You can adjust the region with the slider as needed.</span>",
+        unsafe_allow_html=True,
+    )
+
+    # ------- Slider default is auto_region ---------
     region = st.slider("Select Potential Range For Fitting (activation/linear region)",
                        float(np.min(E)), float(np.max(E)),
-                       (left_default, right_default), step=0.001)
+                       auto_region, step=0.001)
 
     mask_fit = (E >= region[0]) & (E <= region[1])
     E_win = E[mask_fit]
     I_win = I[mask_fit]
     logI_win = logI[mask_fit]
 
-    # --- Plot 1: Raw I vs E with highlighted fit region
+    # Also mask for auto-region for "hint"
+    mask_auto = (E >= auto_region[0]) & (E <= auto_region[1])
+    E_auto = E[mask_auto]
+    I_auto = I[mask_auto]
+    logI_auto = logI[mask_auto]
+
+    # --- Plot 1: Raw I vs E with yellow auto region and green user region (if changed)
     fig_raw, ax_raw = plt.subplots(figsize=(8, 4))
     ax_raw.plot(E, I, '.', label='Raw Data')
-    ax_raw.axvspan(region[0], region[1], color='yellow', alpha=0.3, label='Fit region')
+    ax_raw.axvspan(auto_region[0], auto_region[1], color='yellow', alpha=0.2, label='Suggested activation region')
+    if region != auto_region:
+        ax_raw.axvspan(region[0], region[1], color='lime', alpha=0.18, label='Your selected fit region')
+    else:
+        ax_raw.axvspan(region[0], region[1], color='lime', alpha=0.0)
     ax_raw.axvline(Ecorr, color="gray", ls="--", lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
     ax_raw.set_xlabel('Potential (V)')
     ax_raw.set_ylabel('Current (A)')
     ax_raw.legend()
     ax_raw.grid(True)
     st.pyplot(fig_raw)
-    st.caption("**Activation (fit) region highlighted in yellow.**")
+    st.caption("**Yellow = auto-detected 'suggested' activation (Tafel) region. Lime = region you selected for fitting.**")
 
-    # --- Plot 2: Tafel (log|I| vs E) with highlighted fit region and linear fit
+    # --- Plot 2: Tafel (log|I| vs E) with auto/manual region, linear fit overlay
     slope, intercept, r2 = fit_tafel_region(E_win, logI_win)
     fit_line = slope * E_win + intercept
-    beta = 2.303/slope if slope > 0 else -2.303/slope
+    beta = (2.303 / slope) if slope > 0 else (-2.303 / slope)
     corrosion_rate = 0.00327 * np.abs(Icorr)  # mm/y, placeholder
 
     fig_tafel, ax_tafel = plt.subplots(figsize=(8, 4))
     ax_tafel.plot(E, logI, '.', color='gray', label='All log|I| vs E')
-    ax_tafel.plot(E_win, logI_win, 'o', color='C1', label='Selected Linear Region')
+    ax_tafel.axvspan(auto_region[0], auto_region[1], color='yellow', alpha=0.2, label='Suggested activation region')
+    ax_tafel.plot(E_auto, logI_auto, 's', color='gold', label='Auto activation data')
+    ax_tafel.plot(E_win, logI_win, 'o', color='lime', label='Your fit region')
     ax_tafel.plot(E_win, fit_line, '-', color='C0', lw=2, label=f'Linear Fit (R²={r2:.3f})')
-    ax_tafel.axvspan(region[0], region[1], color='yellow', alpha=0.3)
     ax_tafel.axvline(Ecorr, color="gray", ls="--", lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
     ax_tafel.set_xlabel('Potential (V)')
     ax_tafel.set_ylabel('log10(|Current| / A)')
     ax_tafel.legend()
     ax_tafel.grid(True)
     st.pyplot(fig_tafel)
-    st.caption("**Tafel plot with fit region & linear fit.**")
+    st.caption("**Yellow = auto-suggested region. Lime = your actual fit region. You can use the slider to adjust.**")
 
     # --- Results Table ---
     st.markdown("### Results")
