@@ -3,6 +3,14 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import linregress
+import os
+
+try:
+    from polcurvefit import polcurvefit
+    POLCURVEFIT_INSTALLED = True
+except ImportError:
+    POLCURVEFIT_INSTALLED = False
+    st.warning("polcurvefit not installed. Install it for automatic activation region suggestion.")
 
 st.set_page_config(layout="wide")
 st.title("Tafel Analysis App")
@@ -27,7 +35,7 @@ def interpolate_corr(E, I):
     return Ecorr, Icorr
 
 if uploaded_file:
-    # Read
+    # Read the file
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
     else:
@@ -56,7 +64,6 @@ if uploaded_file:
     I = I[idx_sort]
     logI = np.log10(I)
 
-    # Find Ecorr/Icorr as closest to zero current
     Ecorr, Icorr = interpolate_corr(E, I)
 
     # ---------- Preview plot: raw data (all gray) + Ecorr ----------
@@ -157,3 +164,32 @@ if uploaded_file:
     st.write(f"**Corrosion Rate (mm/y):** `{corrosion_rate:.3e}`")
     st.write(f"**R² anodic:** `{r2_a:.3f}`")
     st.write(f"**R² cathodic:** `{r2_c:.3f}`")
+
+    # --- Automatic region detection & plot using polcurvefit ---
+    if POLCURVEFIT_INSTALLED:
+        st.markdown("---")
+        st.markdown("## Automatic Activation Region (using polcurvefit)")
+        plot_output_folder = 'Visualization_activation_control_fit'
+        if not os.path.isdir(plot_output_folder):
+            os.makedirs(plot_output_folder)
+        try:
+            # Use the window argument to match your desired region (-0.07,0.07) = +/-70 mV
+            Polcurve = polcurvefit(E, I, sample_surface=1E-4)
+            popt, E_corr, I_corr, anodic_slope, cathodic_slope, r_square = Polcurve.active_pol_fit(window=[-0.07, 0.07])
+            st.write("Auto-detected activation region and fit parameters:")
+            st.write(f"Fitted parameters: {popt}")
+            st.write(f"E_corr: {E_corr}")
+            st.write(f"I_corr: {I_corr}")
+            st.write(f"Anodic slope: {anodic_slope}")
+            st.write(f"Cathodic slope: {cathodic_slope}")
+            st.write(f"R²: {r_square}")
+            Polcurve.plotting(output_folder=plot_output_folder)
+            files = os.listdir(plot_output_folder)
+            for plot_file in files:
+                if plot_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    plot_path = os.path.join(plot_output_folder, plot_file)
+                    st.image(plot_path, caption=plot_file)
+        except Exception as e:
+            st.error(f"polcurvefit failed: {e}")
+    else:
+        st.info("Install the `polcurvefit` Python package to enable automatic activation region detection and visualization.")
