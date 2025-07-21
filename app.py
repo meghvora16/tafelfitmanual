@@ -3,17 +3,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import linregress
-import os
-
-try:
-    from polcurvefit import polcurvefit
-    POLCURVEFIT_INSTALLED = True
-except ImportError:
-    POLCURVEFIT_INSTALLED = False
-    st.warning("polcurvefit not installed. Install it for automatic activation region suggestion.")
 
 st.set_page_config(layout="wide")
-st.title("Tafel Analysis App")
+st.title("Tafel Analysis with Manual Linear Region Selection")
 
 uploaded_file = st.file_uploader(
     "Upload your polarization file (.xlsx/.csv)",
@@ -53,7 +45,7 @@ if uploaded_file:
     # Data
     E_raw = df[potential_col].values.astype(float)
     I_raw = df[current_col].values.astype(float)
-    E, I = clean_data(E_raw, np.abs(I_raw))  # log(|I|) vs E
+    E, I = clean_data(E_raw, np.abs(I_raw))  # Tafel analysis uses log(|I|) vs E
 
     if len(E) < 10:
         st.warning("Too few valid data points for analysis.")
@@ -66,7 +58,7 @@ if uploaded_file:
 
     Ecorr, Icorr = interpolate_corr(E, I)
 
-    # ---------- Preview plot: raw data (all gray) + Ecorr ----------
+    # ---------- Preview plot: raw data + Ecorr ----------
     fig, ax = plt.subplots()
     ax.plot(E, I, '.', color="lightgray", markersize=3, label="All Data")
     ax.axvline(Ecorr, color='gray', linestyle='--', label=f'Ecorr = {Ecorr:.3f} V')
@@ -75,9 +67,9 @@ if uploaded_file:
     ax.grid(True)
     ax.legend()
     st.pyplot(fig)
-    st.info("Select the linear (activation/Tafel) cathodic and anodic regions below.")
+    st.info("Select the linear (flat Tafel) cathodic and anodic regions below.")
 
-    # ---------- Choose window for fit regions ----------
+    # ---------- Choose region for fit ----------
     cath_idx = np.where(E < Ecorr)[0]
     anod_idx = np.where(E > Ecorr)[0]
 
@@ -116,12 +108,10 @@ if uploaded_file:
         st.error("Select a wider anodic region to allow fitting.")
         st.stop()
 
-    E_cath, logI_cath = E[mask_cath], logI[mask_cath]
-    E_anod, logI_anod = E[mask_anod], logI[mask_anod]
-    I_cath = I[mask_cath]
-    I_anod = I[mask_anod]
+    E_cath, logI_cath, I_cath = E[mask_cath], logI[mask_cath], I[mask_cath]
+    E_anod, logI_anod, I_anod = E[mask_anod], logI[mask_anod], I[mask_anod]
 
-    # ---------- Raw data plot with regions highlighted ----------
+    # ---------- Raw data (Current vs. Potential) plot with regions highlighted ----------
     fig0, ax0 = plt.subplots()
     ax0.plot(E, I, '.', color='lightgray', markersize=3, label="All Data")
     ax0.plot(E_cath, I_cath, 'x', color='blue', label="Cathodic region")
@@ -134,7 +124,7 @@ if uploaded_file:
     st.pyplot(fig0)
     st.caption("Linear Tafel regions marked on the raw LSV plot.")
 
-    # ---------- Tafel plot with regions and fits ----------
+    # ---------- Tafel plot (log Current vs. Potential) with fit ----------
     slope_c, int_c, r2_c = fit_region(E_cath, logI_cath)
     slope_a, int_a, r2_a = fit_region(E_anod, logI_anod)
     beta_c = -2.303/slope_c
@@ -155,7 +145,7 @@ if uploaded_file:
     st.pyplot(fig2)
     st.caption("Linear regions and fits on log(I) vs E (Tafel) plot.")
 
-    # -------- Table of results --------
+    # -------- Parameters Table --------
     st.markdown("### **Tafel Fit Parameters:**")
     st.write(f"**Ecorr (V):** `{Ecorr:.5f}`")
     st.write(f"**Icorr (A):** `{Icorr:.3e}`")
@@ -164,32 +154,3 @@ if uploaded_file:
     st.write(f"**Corrosion Rate (mm/y):** `{corrosion_rate:.3e}`")
     st.write(f"**R² anodic:** `{r2_a:.3f}`")
     st.write(f"**R² cathodic:** `{r2_c:.3f}`")
-
-    # --- Automatic region detection & plot using polcurvefit ---
-    if POLCURVEFIT_INSTALLED:
-        st.markdown("---")
-        st.markdown("## Automatic Activation Region (using polcurvefit)")
-        plot_output_folder = 'Visualization_activation_control_fit'
-        if not os.path.isdir(plot_output_folder):
-            os.makedirs(plot_output_folder)
-        try:
-            # Use the window argument to match your desired region (-0.07,0.07) = +/-70 mV
-            Polcurve = polcurvefit(E, I, sample_surface=1E-4)
-            popt, E_corr, I_corr, anodic_slope, cathodic_slope, r_square = Polcurve.active_pol_fit(window=[-0.07, 0.07])
-            st.write("Auto-detected activation region and fit parameters:")
-            st.write(f"Fitted parameters: {popt}")
-            st.write(f"E_corr: {E_corr}")
-            st.write(f"I_corr: {I_corr}")
-            st.write(f"Anodic slope: {anodic_slope}")
-            st.write(f"Cathodic slope: {cathodic_slope}")
-            st.write(f"R²: {r_square}")
-            Polcurve.plotting(output_folder=plot_output_folder)
-            files = os.listdir(plot_output_folder)
-            for plot_file in files:
-                if plot_file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    plot_path = os.path.join(plot_output_folder, plot_file)
-                    st.image(plot_path, caption=plot_file)
-        except Exception as e:
-            st.error(f"polcurvefit failed: {e}")
-    else:
-        st.info("Install the `polcurvefit` Python package to enable automatic activation region detection and visualization.")
