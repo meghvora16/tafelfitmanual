@@ -36,9 +36,7 @@ if uploaded_file:
     st.write("#### Data preview")
     st.dataframe(df.head())
 
-    # Let user pick columns (robust for any header name)
     cols = df.columns.tolist()
-    # Try to guess likely column (default to those containing 'current' or 'potential')
     guess_E = next((c for c in cols if "potential" in c.lower()), cols[0])
     guess_I = next((c for c in cols if "current" in c.lower()), cols[1])
     potential_col = st.selectbox("Select the Potential column:", cols, index=cols.index(guess_E))
@@ -47,13 +45,12 @@ if uploaded_file:
     # Data
     E_raw = df[potential_col].values.astype(float)
     I_raw = df[current_col].values.astype(float)
-    E, I = clean_data(E_raw, np.abs(I_raw))  # Tafel analysis is log(|I|) vs. E
+    E, I = clean_data(E_raw, np.abs(I_raw))  # log(|I|) vs E
 
     if len(E) < 10:
         st.warning("Too few valid data points for analysis.")
         st.stop()
 
-    # Sort for slider logic and plotting
     idx_sort = np.argsort(E)
     E = E[idx_sort]
     I = I[idx_sort]
@@ -62,19 +59,18 @@ if uploaded_file:
     # Find Ecorr/Icorr as closest to zero current
     Ecorr, Icorr = interpolate_corr(E, I)
 
-    # ---------- Preview plot ----------
+    # ---------- Preview plot: raw data (all gray) + Ecorr ----------
     fig, ax = plt.subplots()
-    ax.plot(E, logI, '.', color="lightgray", markersize=3, label="All log|I| vs E")
+    ax.plot(E, I, '.', color="lightgray", markersize=3, label="All Data")
     ax.axvline(Ecorr, color='gray', linestyle='--', label=f'Ecorr = {Ecorr:.3f} V')
     ax.set_xlabel("Potential (V)")
-    ax.set_ylabel("log10(Current / A)")
+    ax.set_ylabel("Current (A)")
     ax.grid(True)
     ax.legend()
     st.pyplot(fig)
+    st.info("Select the linear (activation/Tafel) cathodic and anodic regions below.")
 
-    st.info("Select the linear(flat) cathodic and anodic regions using sliders")
     # ---------- Choose window for fit regions ----------
-    # Points left/right of Ecorr
     cath_idx = np.where(E < Ecorr)[0]
     anod_idx = np.where(E > Ecorr)[0]
 
@@ -82,7 +78,6 @@ if uploaded_file:
         st.error("Not enough data points in one or both regions around Ecorr!")
         st.stop()
 
-    # To avoid massive slider lists, only sample up to 40 points for region endpoints
     def subsample(ar):
         step = max(1, len(ar)//40)
         return ar[::step] if len(ar) > 40 else ar
@@ -104,7 +99,6 @@ if uploaded_file:
             value=(anod_options[1], anod_options[-2])
         )
 
-    # Mask for fitting
     mask_cath = (E >= cath_range[0]) & (E <= cath_range[1])
     mask_anod = (E >= anod_range[0]) & (E <= anod_range[1])
 
@@ -114,20 +108,36 @@ if uploaded_file:
     if mask_anod.sum() < 3:
         st.error("Select a wider anodic region to allow fitting.")
         st.stop()
+
     E_cath, logI_cath = E[mask_cath], logI[mask_cath]
     E_anod, logI_anod = E[mask_anod], logI[mask_anod]
+    I_cath = I[mask_cath]
+    I_anod = I[mask_anod]
 
+    # ---------- Raw data plot with regions highlighted ----------
+    fig0, ax0 = plt.subplots()
+    ax0.plot(E, I, '.', color='lightgray', markersize=3, label="All Data")
+    ax0.plot(E_cath, I_cath, 'x', color='blue', label="Cathodic region")
+    ax0.plot(E_anod, I_anod, 'o', color='orange', label="Anodic region")
+    ax0.axvline(Ecorr, color='gray', linestyle='--', label=f'Ecorr = {Ecorr:.3f} V')
+    ax0.set_xlabel("Potential (V)")
+    ax0.set_ylabel("Current (A)")
+    ax0.legend()
+    ax0.grid(True)
+    st.pyplot(fig0)
+    st.caption("Linear Tafel regions marked on the raw LSV plot.")
+
+    # ---------- Tafel plot with regions and fits ----------
     slope_c, int_c, r2_c = fit_region(E_cath, logI_cath)
     slope_a, int_a, r2_a = fit_region(E_anod, logI_anod)
     beta_c = -2.303/slope_c
     beta_a = 2.303/slope_a
     corrosion_rate = 0.00327 * Icorr  # mm/y, placeholder
 
-    # ---------- Final plot with fits ----------
     fig2, ax2 = plt.subplots()
     ax2.plot(E, logI, '.', color='lightgray', markersize=3, label="All log|I| vs E")
-    ax2.plot(E_cath, logI_cath, 'x', color='blue', label="Cathodic")
-    ax2.plot(E_anod, logI_anod, 'o', color='orange', label="Anodic")
+    ax2.plot(E_cath, logI_cath, 'x', color='blue', label="Cathodic region")
+    ax2.plot(E_anod, logI_anod, 'o', color='orange', label="Anodic region")
     ax2.plot(E_cath, slope_c*E_cath + int_c, 'b-', lw=2, label=f'Cathodic Fit (R²={r2_c:.2f})')
     ax2.plot(E_anod, slope_a*E_anod + int_a, 'r-', lw=2, label=f'Anodic Fit (R²={r2_a:.2f})')
     ax2.axvline(Ecorr, color='gray', linestyle='--', label=f'Ecorr = {Ecorr:.3f} V')
@@ -136,6 +146,7 @@ if uploaded_file:
     ax2.legend()
     ax2.grid(True)
     st.pyplot(fig2)
+    st.caption("Linear regions and fits on log(I) vs E (Tafel) plot.")
 
     # -------- Table of results --------
     st.markdown("### **Tafel Fit Parameters:**")
