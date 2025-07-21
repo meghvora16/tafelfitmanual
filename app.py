@@ -4,15 +4,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import linregress
 
-def sci_notation(val, precision=3):
-    try:
-        return f"{float(val):.{precision}e}"
-    except (TypeError, ValueError):
-        return val
+st.set_page_config(layout="wide")
+st.title("Tafel Analysis App (Auto-Suggested Activation Region)")
 
-def fit_tafel_region(E, logI):
-    slope, intercept, r_val, _, _ = linregress(E, logI)
-    return slope, intercept, r_val**2
+uploaded_file = st.file_uploader(
+    "Upload your polarization file (.xlsx/.csv)",
+    type=['xlsx', 'csv'], accept_multiple_files=False
+)
+
+def clean_data(E, I):
+    mask = (I != 0) & np.isfinite(E) & np.isfinite(I)
+    return E[mask], I[mask]
+
+def fit_region(E, logI):
+    slope, intercept, r2, _, _ = linregress(E, logI)
+    return slope, intercept, r2**2
 
 def interpolate_corr(E, I):
     idx = np.argmin(np.abs(I))
@@ -20,13 +26,8 @@ def interpolate_corr(E, I):
     Icorr = I[idx]
     return Ecorr, Icorr
 
-st.set_page_config(layout='wide')
-st.title("Tafel Analysis With Auto-Suggested and Manual Activation (Linear) Region")
-
-uploaded_file = st.file_uploader("Upload Excel or CSV", type=['xlsx', 'csv'])
-
 if uploaded_file:
-    # Read data
+    # Read
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
     else:
@@ -35,93 +36,110 @@ if uploaded_file:
     st.write("#### Data preview")
     st.dataframe(df.head())
 
-    # User picks columns
-    columns = df.columns.tolist()
-    E_col = st.selectbox("Select the Potential column:", columns, index=0)
-    I_col = st.selectbox("Select the Current column:", columns, index=1)
+    # Let user pick columns
+    cols = df.columns.tolist()
+    guess_E = next((c for c in cols if "potential" in c.lower()), cols[0])
+    guess_I = next((c for c in cols if "current" in c.lower()), cols[1])
+    potential_col = st.selectbox("Select the Potential column:", cols, index=cols.index(guess_E))
+    current_col = st.selectbox("Select the Current column:", cols, index=cols.index(guess_I))
 
-    E_all = df[E_col].values.astype(float)
-    I_all = df[I_col].values.astype(float)
-    mask_valid = (np.isfinite(E_all) & np.isfinite(I_all)) & (I_all != 0)
-    E = E_all[mask_valid]
-    I = I_all[mask_valid]
-    logI = np.log10(np.abs(I))
+    # Data
+    E_raw = df[potential_col].values.astype(float)
+    I_raw = df[current_col].values.astype(float)
+    E, I = clean_data(E_raw, np.abs(I_raw))  # Tafel analysis is log(|I|) vs. E
+
+    if len(E) < 10:
+        st.warning("Too few valid data points for analysis.")
+        st.stop()
+
+    # Sort by E for plotting and processing
+    idx_sort = np.argsort(E)
+    E = E[idx_sort]
+    I = I[idx_sort]
+    logI = np.log10(I)
+
+    # Find Ecorr/Icorr as closest to zero current
     Ecorr, Icorr = interpolate_corr(E, I)
 
-    # --------- Auto activation region detection (±0.07 V around Ecorr, clipped to data range) -----
-    delta_E_auto = 0.07
-    auto_left = float(max(np.min(E), Ecorr - delta_E_auto))
-    auto_right = float(min(np.max(E), Ecorr + delta_E_auto))
-    auto_region = (auto_left, auto_right)
+    # ---- AUTO REGION: activation region as Ecorr ± 0.07 V (clipped to data range) ----
+    delta_V = 0.07
+    E_cath_left = max(np.min(E), Ecorr - delta_V)
+    E_cath_right = Ecorr
+    E_anod_left = Ecorr
+    E_anod_right = min(np.max(E), Ecorr + delta_V)
 
-    st.markdown("### 1. Choose the region (window) for the Tafel (linear) fit:")
-    st.markdown(
-        f"<span style='color:darkorange'>The yellow region below is automatically suggested as a starting point (Ecorr ± 0.07 V). You can adjust the region with the slider as needed.</span>",
-        unsafe_allow_html=True,
-    )
+    # Mask for fitting (auto region!)
+    mask_cath = (E >= E_cath_left) & (E < E_cath_right)
+    mask_anod = (E > E_anod_left) & (E <= E_anod_right)
 
-    # ------- Slider default is auto_region ---------
-    region = st.slider("Select Potential Range For Fitting (activation/linear region)",
-                       float(np.min(E)), float(np.max(E)),
-                       auto_region, step=0.001)
+    # Show warning if region too small
+    if mask_cath.sum() < 3 or mask_anod.sum() < 3:
+        st.error("Auto activation region (Ecorr ± 0.07 V) is too small for fitting. Adjust delta_V or check your data.")
+        st.stop()
 
-    mask_fit = (E >= region[0]) & (E <= region[1])
-    E_win = E[mask_fit]
-    I_win = I[mask_fit]
-    logI_win = logI[mask_fit]
+    E_cath, logI_cath = E[mask_cath], logI[mask_cath]
+    E_anod, logI_anod = E[mask_anod], logI[mask_anod]
+    I_cath = I[mask_cath]
+    I_anod = I[mask_anod]
 
-    # Also mask for auto-region for "hint"
-    mask_auto = (E >= auto_region[0]) & (E <= auto_region[1])
-    E_auto = E[mask_auto]
-    I_auto = I[mask_auto]
-    logI_auto = logI[mask_auto]
+    # ---- Preview plot: log(I) vs E with yellow highlight ----
+    fig, ax = plt.subplots(figsize=(8,4))
+    ax.plot(E, logI, '.', color="lightgray", markersize=3, label="All log|I| vs E")
+    ax.axvspan(E_cath_left, E_cath_right, color='yellow', alpha=0.3, label="Auto cathodic region")
+    ax.axvspan(E_anod_left, E_anod_right, color='gold', alpha=0.3, label="Auto anodic region")
+    ax.axvline(Ecorr, color='gray', linestyle='--', lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
+    ax.set_xlabel("Potential (V)")
+    ax.set_ylabel("log10(Current / A)")
+    ax.legend()
+    ax.grid(True)
+    st.pyplot(fig)
+    st.caption("Yellow = Automatically detected activation (Tafel) region used for fit.")
 
-    # --- Plot 1: Raw I vs E with yellow auto region and green user region (if changed)
-    fig_raw, ax_raw = plt.subplots(figsize=(8, 4))
-    ax_raw.plot(E, I, '.', label='Raw Data')
-    ax_raw.axvspan(auto_region[0], auto_region[1], color='yellow', alpha=0.2, label='Suggested activation region')
-    if region != auto_region:
-        ax_raw.axvspan(region[0], region[1], color='lime', alpha=0.18, label='Your selected fit region')
-    else:
-        ax_raw.axvspan(region[0], region[1], color='lime', alpha=0.0)
-    ax_raw.axvline(Ecorr, color="gray", ls="--", lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
-    ax_raw.set_xlabel('Potential (V)')
-    ax_raw.set_ylabel('Current (A)')
-    ax_raw.legend()
-    ax_raw.grid(True)
-    st.pyplot(fig_raw)
-    st.caption("**Yellow = auto-detected 'suggested' activation (Tafel) region. Lime = region you selected for fitting.**")
+    # ---- Raw i vs. E plot with auto region highlighted (for user context) ----
+    fig0, ax0 = plt.subplots(figsize=(8,4))
+    ax0.plot(E, I, '.', color='lightgray', markersize=3, label="All Data")
+    ax0.plot(E_cath, I_cath, 'x', color='blue', label="Auto cathodic region")
+    ax0.plot(E_anod, I_anod, 'o', color='orange', label="Auto anodic region")
+    ax0.axvspan(E_cath_left, E_cath_right, color='yellow', alpha=0.3)
+    ax0.axvspan(E_anod_left, E_anod_right, color='gold', alpha=0.3)
+    ax0.axvline(Ecorr, color='gray', linestyle='--', lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
+    ax0.set_xlabel("Potential (V)")
+    ax0.set_ylabel("Current (A)")
+    ax0.legend()
+    ax0.grid(True)
+    st.pyplot(fig0)
+    st.caption("Yellow/Gold = Activation (fit) window (auto-detected). Used for parameter extraction.")
 
-    # --- Plot 2: Tafel (log|I| vs E) with auto/manual region, linear fit overlay
-    slope, intercept, r2 = fit_tafel_region(E_win, logI_win)
-    fit_line = slope * E_win + intercept
-    beta = (2.303 / slope) if slope > 0 else (-2.303 / slope)
-    corrosion_rate = 0.00327 * np.abs(Icorr)  # mm/y, placeholder
+    # ---- Tafel fit on activation regions only ----
+    slope_c, int_c, r2_c = fit_region(E_cath, logI_cath)
+    slope_a, int_a, r2_a = fit_region(E_anod, logI_anod)
+    beta_c = -2.303/slope_c
+    beta_a = 2.303/slope_a
+    corrosion_rate = 0.00327 * Icorr  # mm/y, placeholder
 
-    fig_tafel, ax_tafel = plt.subplots(figsize=(8, 4))
-    ax_tafel.plot(E, logI, '.', color='gray', label='All log|I| vs E')
-    ax_tafel.axvspan(auto_region[0], auto_region[1], color='yellow', alpha=0.2, label='Suggested activation region')
-    ax_tafel.plot(E_auto, logI_auto, 's', color='gold', label='Auto activation data')
-    ax_tafel.plot(E_win, logI_win, 'o', color='lime', label='Your fit region')
-    ax_tafel.plot(E_win, fit_line, '-', color='C0', lw=2, label=f'Linear Fit (R²={r2:.3f})')
-    ax_tafel.axvline(Ecorr, color="gray", ls="--", lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
-    ax_tafel.set_xlabel('Potential (V)')
-    ax_tafel.set_ylabel('log10(|Current| / A)')
-    ax_tafel.legend()
-    ax_tafel.grid(True)
-    st.pyplot(fig_tafel)
-    st.caption("**Yellow = auto-suggested region. Lime = your actual fit region. You can use the slider to adjust.**")
+    # --- Tafel plot with fit lines on activation region ---
+    fig2, ax2 = plt.subplots(figsize=(8,4))
+    ax2.plot(E, logI, '.', color='lightgray', markersize=3, label="All log|I| vs E")
+    ax2.plot(E_cath, logI_cath, 'x', color='blue', label="Auto cathodic region")
+    ax2.plot(E_anod, logI_anod, 'o', color='orange', label="Auto anodic region")
+    ax2.plot(E_cath, slope_c*E_cath + int_c, 'b-', lw=2, label=f'Cathodic Fit (R²={r2_c:.2f})')
+    ax2.plot(E_anod, slope_a*E_anod + int_a, 'r-', lw=2, label=f'Anodic Fit (R²={r2_a:.2f})')
+    ax2.axvspan(E_cath_left, E_cath_right, color='yellow', alpha=0.3)
+    ax2.axvspan(E_anod_left, E_anod_right, color='gold', alpha=0.3)
+    ax2.axvline(Ecorr, color='gray', linestyle='--', lw=1.2, label=f'Ecorr = {Ecorr:.3f} V')
+    ax2.set_xlabel("Potential (V)")
+    ax2.set_ylabel("log10(Current / A)")
+    ax2.legend()
+    ax2.grid(True)
+    st.pyplot(fig2)
+    st.caption("Tafel fits on activation regions. Regions selected automatically.")
 
-    # --- Results Table ---
-    st.markdown("### Results")
-    result_table = {
-        "Ecorr (V)": sci_notation(Ecorr),
-        "Icorr (A)": sci_notation(Icorr),
-        "Beta (V/dec)": sci_notation(beta),
-        "Corrosion Rate (mm/y)": sci_notation(corrosion_rate),
-        "R² fit": f"{r2:.3f}"
-    }
-    st.table(result_table)
-
-    if r2 < 0.95:
-        st.warning("Low R² for fit: try tightening region to a straight section only.")
+    # -------- Table of results --------
+    st.markdown("### **Tafel Fit Parameters (from auto region):**")
+    st.write(f"**Ecorr (V):** `{Ecorr:.5f}`")
+    st.write(f"**Icorr (A):** `{Icorr:.3e}`")
+    st.write(f"**Beta_a (V/dec):** `{beta_a:.3e}`")
+    st.write(f"**Beta_c (V/dec):** `{beta_c:.3e}`")
+    st.write(f"**Corrosion Rate (mm/y):** `{corrosion_rate:.3e}`")
+    st.write(f"**R² anodic:** `{r2_a:.3f}`")
+    st.write(f"**R² cathodic:** `{r2_c:.3f}`")
