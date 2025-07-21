@@ -1,6 +1,6 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import linregress
 
@@ -16,22 +16,37 @@ def clean_data(E, I):
     return E[mask], I[mask]
 
 def find_best_linear_region(E, logI, side='cathodic', Ecorr=None, min_pts=5):
-    # Find the longest window with best R² for logI vs E, each side of Ecorr
     best_r2 = -np.inf
-    best_slice = slice(0, min_pts)
-    N = len(E)
-    indices = (E < Ecorr) if side == 'cathodic' else (E > Ecorr)
-    idxs = np.where(indices)[0]
-    for i in range(len(idxs)):
-        for j in range(i + min_pts - 1, len(idxs)):
-            window = idxs[i:j+1]
-            x, y = E[window], logI[window]
-            if len(x) < min_pts: continue
-            slope, intercept, r_value, _, _ = linregress(x, y)
-            if r_value ** 2 > best_r2:
-                best_r2 = r_value ** 2
-                best_slice = window
-    return best_slice, best_r2
+    best_indices = None
+    
+    if side == 'cathodic':
+        region_mask = (E < Ecorr)
+    else:
+        region_mask = (E > Ecorr)
+    E_side = E[region_mask]
+    logI_side = logI[region_mask]
+    n = len(E_side)
+    if n < min_pts:
+        return np.array([], dtype=int), -np.inf
+    # Brute force search for best window
+    for i in range(n - min_pts + 1):
+        for j in range(i + min_pts, n + 1):
+            x_win = E_side[i:j]
+            y_win = logI_side[i:j]
+            if len(x_win) < min_pts: continue
+            slope, intercept, r_value, _, _ = linregress(x_win, y_win)
+            r2 = r_value ** 2
+            if r2 > best_r2:
+                best_r2 = r2
+                # Save mask for those points (relative to full E)
+                # Find which points in the full E array these correspond to:
+                selected_vals = E_side[i:j]
+                indices = np.where(np.isin(E, selected_vals))[0]
+                best_indices = indices
+    if best_indices is not None:
+        return best_indices, best_r2
+    else:
+        return np.array([], dtype=int), -np.inf
 
 def fit_region(E, logI):
     slope, intercept, r2, _, _ = linregress(E, logI)
@@ -67,7 +82,6 @@ if uploaded_file:
         st.warning("Too few valid data points for analysis.")
         st.stop()
 
-    # Sort for processing
     idx_sort = np.argsort(E)
     E = E[idx_sort]
     I = I[idx_sort]
@@ -78,11 +92,16 @@ if uploaded_file:
     st.write(f"**Auto-detected Ecorr:** {Ecorr:.3f} V")
 
     # -------- Auto find best linear region each side of Ecorr --------
-    cath_slice, r2_c = find_best_linear_region(E, logI, 'cathodic', Ecorr)
-    anod_slice, r2_a = find_best_linear_region(E, logI, 'anodic', Ecorr)
+    cath_indices, r2_c = find_best_linear_region(E, logI, 'cathodic', Ecorr)
+    anod_indices, r2_a = find_best_linear_region(E, logI, 'anodic', Ecorr)
 
-    E_cath, logI_cath, I_cath = E[cath_slice], logI[cath_slice], I[cath_slice]
-    E_anod, logI_anod, I_anod = E[anod_slice], logI[anod_slice], I[anod_slice]
+    # Check these regions are not empty/min size
+    if len(cath_indices) < 5 or len(anod_indices) < 5:
+        st.error("Could not find a wide enough linear region automatically. Try cleaner data or adjust algorithm.")
+        st.stop()
+
+    E_cath, logI_cath, I_cath = E[cath_indices], logI[cath_indices], I[cath_indices]
+    E_anod, logI_anod, I_anod = E[anod_indices], logI[anod_indices], I[anod_indices]
 
     slope_c, int_c, fitr2_c = fit_region(E_cath, logI_cath)
     slope_a, int_a, fitr2_a = fit_region(E_anod, logI_anod)
