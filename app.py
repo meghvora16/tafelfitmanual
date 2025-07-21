@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 
 st.set_page_config(layout="wide")
-st.title("Tafel Analysis App (Auto Linear Region Detection)")
+st.title("Tafel Analysis App (Auto Linear Region Detection – Fast)")
 
 uploaded_file = st.file_uploader(
     "Upload polarization file (.xlsx/.csv)", type=['xlsx', 'csv'], accept_multiple_files=False
@@ -15,36 +15,40 @@ def clean_data(E, I):
     mask = (I != 0) & np.isfinite(E) & np.isfinite(I)
     return E[mask], I[mask]
 
-def find_best_linear_region(E, logI, side='cathodic', Ecorr=None, min_pts=5):
+def find_best_linear_region(E, logI, side='cathodic', Ecorr=None, min_pts=8, max_pts=25):
     best_r2 = -np.inf
-    best_indices = None
-    
+    best_start, best_end = 0, 0
     if side == 'cathodic':
         region_mask = (E < Ecorr)
     else:
         region_mask = (E > Ecorr)
+    # Extract and sort for consistency
     E_side = E[region_mask]
     logI_side = logI[region_mask]
     n = len(E_side)
     if n < min_pts:
         return np.array([], dtype=int), -np.inf
-    # Brute force search for best window
-    for i in range(n - min_pts + 1):
-        for j in range(i + min_pts, n + 1):
-            x_win = E_side[i:j]
-            y_win = logI_side[i:j]
-            if len(x_win) < min_pts: continue
+    # Only sort arrays if not monotonic
+    idx_sort = np.argsort(E_side)
+    E_side = E_side[idx_sort]
+    logI_side = logI_side[idx_sort]
+    for w in range(min_pts, min(max_pts+1, n+1)):
+        for i in range(n - w + 1):
+            x_win = E_side[i:i+w]
+            y_win = logI_side[i:i+w]
+            if len(np.unique(x_win)) < 2:
+                continue
             slope, intercept, r_value, _, _ = linregress(x_win, y_win)
             r2 = r_value ** 2
             if r2 > best_r2:
                 best_r2 = r2
-                # Save mask for those points (relative to full E)
-                # Find which points in the full E array these correspond to:
-                selected_vals = E_side[i:j]
-                indices = np.where(np.isin(E, selected_vals))[0]
-                best_indices = indices
-    if best_indices is not None:
-        return best_indices, best_r2
+                best_start = i
+                best_end = i+w
+    # Map window back to full E array indices:
+    if best_end > best_start:
+        chosen_Es = E_side[best_start:best_end]
+        indices = np.where(np.isin(E, chosen_Es))[0]
+        return indices, best_r2
     else:
         return np.array([], dtype=int), -np.inf
 
@@ -59,7 +63,6 @@ def interpolate_corr(E, I):
     return Ecorr, Icorr
 
 if uploaded_file:
-    # Read
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
     else:
@@ -88,16 +91,13 @@ if uploaded_file:
     logI = np.log10(I)
 
     Ecorr, Icorr = interpolate_corr(E, I)
-
     st.write(f"**Auto-detected Ecorr:** {Ecorr:.3f} V")
 
-    # -------- Auto find best linear region each side of Ecorr --------
-    cath_indices, r2_c = find_best_linear_region(E, logI, 'cathodic', Ecorr)
-    anod_indices, r2_a = find_best_linear_region(E, logI, 'anodic', Ecorr)
+    cath_indices, r2_c = find_best_linear_region(E, logI, 'cathodic', Ecorr, min_pts=8, max_pts=25)
+    anod_indices, r2_a = find_best_linear_region(E, logI, 'anodic', Ecorr, min_pts=8, max_pts=25)
 
-    # Check these regions are not empty/min size
     if len(cath_indices) < 5 or len(anod_indices) < 5:
-        st.error("Could not find a wide enough linear region automatically. Try cleaner data or adjust algorithm.")
+        st.error("Could not find a wide enough linear region automatically. Try cleaner data or adjust min/max window size.")
         st.stop()
 
     E_cath, logI_cath, I_cath = E[cath_indices], logI[cath_indices], I[cath_indices]
