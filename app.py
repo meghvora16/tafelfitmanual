@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 
 st.set_page_config(layout="wide")
-st.title("Tafel Single-Branch Extrapolation (Select/Extrapolate Either Branch)")
+st.title("Tafel Single-Branch Extrapolation")
 
 uploaded_file = st.file_uploader(
     "Upload polarization file (.xlsx/.csv)",
