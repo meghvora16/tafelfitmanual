@@ -26,6 +26,8 @@ def interpolate_corr(E, I):
     Icorr = I[idx]
     return Ecorr, Icorr
 
+surface_area = st.number_input("Enter the electrode surface area (cm²)", value=1.0)  # Default to 1 cm²
+
 if uploaded_file:
     # Read
     if uploaded_file.name.endswith('.csv'):
@@ -61,6 +63,8 @@ if uploaded_file:
 
     # Find Ecorr/Icorr as closest to zero current
     Ecorr, Icorr = interpolate_corr(E, I)
+    Icorr_density = Icorr / surface_area  # Current density (A/cm²)
+    corrosion_rate_density = 0.00327 * Icorr_density  # Corrosion rate based on current density
 
     # ---------- Preview plot ----------
     fig, ax = plt.subplots()
@@ -121,7 +125,6 @@ if uploaded_file:
     slope_a, int_a, r2_a = fit_region(E_anod, logI_anod)
     beta_c = -2.303/slope_c
     beta_a = 2.303/slope_a
-    corrosion_rate = 0.00327 * Icorr  # mm/y, placeholder
 
     # ---------- Final plot with fits ----------
     fig2, ax2 = plt.subplots()
@@ -141,8 +144,9 @@ if uploaded_file:
     st.markdown("### **Tafel Fit Parameters:**")
     st.write(f"**Ecorr (V):** `{Ecorr:.5f}`")
     st.write(f"**Icorr (A):** `{Icorr:.3e}`")
+    st.write(f"**Icorr density (A/cm²):** `{Icorr_density:.3e}`")
     st.write(f"**Beta_a (V/dec):** `{beta_a:.3e}`")
     st.write(f"**Beta_c (V/dec):** `{beta_c:.3e}`")
-    st.write(f"**Corrosion Rate (mm/y):** `{corrosion_rate:.3e}`")
+    st.write(f"**Corrosion Rate (mm/y, adjusted):** `{corrosion_rate_density:.3e}`")
     st.write(f"**R² anodic:** `{r2_a:.3f}`")
     st.write(f"**R² cathodic:** `{r2_c:.3f}`")
